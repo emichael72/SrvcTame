@@ -1,8 +1,10 @@
 
 /**
  ******************************************************************************
+ * 
  * @file    srvctame.c
- * @brief   Service Tamer Module for Process Management
+ * @brief   Service for process management.
+ * 
  ******************************************************************************
  * 
  * This file implements a tool for managing process priorities, capable of
@@ -33,12 +35,15 @@
  */
 
 /* Includes ------------------------------------------------------------------*/
+
 #include <windows.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <tlhelp32.h>
+#include "llist.h"
 
 /** @addtogroup SRVC_TAME
   * @{
@@ -63,11 +68,22 @@
   * @{
   */
 
+
+typedef struct __Tamer_ProcList
+{
+    char procName[64];
+    int  priority;
+    struct __Tamer_ProcList *next;
+
+} Tamer_ProcList;
+
 /*! @brief  Module internal data */
 typedef struct __Tamer_GlobalsTypeDef
 {
+    Tamer_ProcList       *procList;
     SERVICE_STATUS        ServiceStatus;
     SERVICE_STATUS_HANDLE hStatus;
+    uint32_t              delayBetween;
     bool                  serviceMode;
 } Tamer_GlobalsTypeDef;
 
@@ -77,6 +93,16 @@ Tamer_GlobalsTypeDef gTamer = {0};
 /**
   * @}
   */
+
+static int Tamer_ReadConfig(void)
+{
+
+
+
+
+    return 0;
+
+}
 
 /**
  * @brief Uninstalls the service.

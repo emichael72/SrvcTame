@@ -131,6 +131,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />
+    <ClInclude Include="Src\llist.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="SrvcTame.rc" />
