@@ -17,9 +17,9 @@ Process Tamer adopts a more subtle approach. Rather than eliminating these proce
     ; This section defines service-level settings
     [Service]
     ; The name displayed in the services management console
-    DisplayName="Intel(R) Process Tamer"
+    DisplayName="Process Tamer"
     ; Description of what the service does
-    Description="Intel(R) service to manage and reduce the priority of specified IT processes to mitigate their impact on system performance."
+    Description="Service to manage and reduce the priority of specified IT processes to mitigate their impact on system performance."
     ; Interval in milliseconds between checks
     Interval= 1000
     
