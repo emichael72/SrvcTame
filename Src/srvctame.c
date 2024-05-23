@@ -185,9 +185,12 @@ static uint32_t Tamer_GetFileCRC(const char *fileName)
     return crc32;
 }
 
-/**
-  * @}
-  */
+/** 
+ * Read the .INI file into teh session configuration object.
+ * After the first full read the function will do nothing if the 
+ * configuration crc32 was not changed from last run.
+ * @return number of items in the processes list or 0 on error.
+ */
 
 static int Tamer_ReadConfig(void)
 {
