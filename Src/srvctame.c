@@ -540,9 +540,9 @@ int main(int argc, char *argv[])
     if ( Tamer_ReadConfig() == 0 )
     {
         if ( gTamer.config && gTamer.config->filePath )
-            printf("Error while reading configuration from %s.\r\n", gTamer.config->filePath);
+            printf("Error while reading configuration from %s.\n", gTamer.config->filePath);
         else
-            printf("Error while looking for %s.\r\n", SRVC_TAME_INI_FILE);
+            printf("Error while looking for %s.\n", SRVC_TAME_INI_FILE);
 
         return EXIT_FAILURE;
     }
@@ -552,17 +552,24 @@ int main(int argc, char *argv[])
     {
         if ( _stricmp(argv[1], "-i") == 0 )
         {
-            return Tamer_ServiceInstall(argv[0], SRVC_TAME_SERVICE_NAME, gTamer.config->serviceDispalyName, gTamer.config->serviceDescription);
+            retVal = Tamer_ServiceInstall(argv[0], SRVC_TAME_SERVICE_NAME, gTamer.config->serviceDispalyName, gTamer.config->serviceDescription);
         }
         else if ( _stricmp(argv[1], "-u") == 0 )
         {
-            return Tamer_ServiceUninstall(SRVC_TAME_SERVICE_NAME);
+            retVal = Tamer_ServiceUninstall(SRVC_TAME_SERVICE_NAME);
         }
         else
         {
             printf("Unknown command line option provided.\n");
             return EXIT_FAILURE;
         }
+
+        if ( retVal == EXIT_SUCCESS )
+            printf("Operation completed successfully.\n");
+        else
+            printf("Operation was not completed successfully.\n");
+
+        return retVal;
     }
 
     /* Service endless loop. */
