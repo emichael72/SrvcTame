@@ -31,7 +31,7 @@ Process Tamer adopts a more subtle approach. Rather than eliminating these proce
 
 ## Building / Installing:
 
-1. Compile using **Visual Studeo 2022** and place it in the desired location.
+1. Compile using **Visual Studeo 2022** and place the executable in any desired location.
 2. Create a configuration file named 'SrvcTame.ini' using Notepad. Follow the provided format and place the file in the Windows directory. Alternatively, for debugging purposes, set **SRVC_TAME_RUN_AS_SERVICE** to false and place the configuration file alongside the executable being debugged.
 3. Open a command prompt with **administrative** rights, navigate to the directory where the executable is located, and execute the following command to install the service: `SrvcTame -i` or `SrvcTame -u` to uninstall. 
 4. To start the service, either restart your system or use the 'Windows Service Management' tool to start the service named "Process Tamer."
