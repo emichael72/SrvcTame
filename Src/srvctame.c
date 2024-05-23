@@ -54,10 +54,12 @@
   * @{
   */
 
-#define SRVC_TAME_CMD_MODE     false          /* Indicate command / service mode */
-#define SRVC_TAME_SERVICE_NAME "ProcessTamer" /* Our service name */
-#define SRVC_TAME_INI_FILE     "SrvcTame.ini" /* Name of the INI file we're using */
-#define SRVC_TAME_INTERVAL     10000          /* 10 seconds */
+#define SRVC_TAME_CMD_MODE             true                             /* Indicate command / service mode */
+#define SRVC_TAME_INI_FILE             "SrvcTame.ini"                   /* Name of the INI file we're using */
+#define SRVC_TAME_SERVICE_NAME         "ProcessTamer"                   /* Service default name */
+#define SRVC_TAME_SERVICE_DISPLAY_NAME "Process Tamer"                  /* Our service default display name */
+#define SRVC_TAME_SERVICE_DESCRIPTION  "Windows process taming service" /* Service default description */
+#define SRVC_TAME_INTERVAL             10000                            /* 10 seconds */
 
 /**
   * @}
@@ -68,27 +70,120 @@
   * @{
   */
 
-
 typedef struct __Tamer_ProcList
 {
-    char procName[64];
-    int  priority;
+    char                     procName[128];
+    int                      priority;
     struct __Tamer_ProcList *next;
 
-} Tamer_ProcList;
+} Tamer_Proc;
+
+typedef struct __Tamer_Config
+{
+    char        serviceName[256];
+    char        serviceDispalyName[256];
+    char        serviceDescription[256];
+    char        filePath[MAX_PATH];
+    uint32_t    interval;
+    uint32_t    crc32;
+    Tamer_Proc *procList;
+
+} Tamer_Config;
 
 /*! @brief  Module internal data */
 typedef struct __Tamer_GlobalsTypeDef
 {
-    Tamer_ProcList       *procList;
     SERVICE_STATUS        ServiceStatus;
     SERVICE_STATUS_HANDLE hStatus;
-    uint32_t              delayBetween;
+    Tamer_Config         *config;
     bool                  serviceMode;
 } Tamer_GlobalsTypeDef;
 
 /* Single instance for all globals */
 Tamer_GlobalsTypeDef gTamer = {0};
+
+/**
+ * @brief Calculate the CRC32 checksum for a given array of data.
+ * 
+ * This function computes the CRC32 checksum using a non-table approach for the given buffer of data.
+ * The CRC calculation uses a standard polynomial widely used in numerous systems to ensure data integrity.
+ *
+ * @param data Pointer to the data buffer whose CRC is to be calculated.
+ * @param length Length of the data buffer in bytes.
+ * @return The computed CRC32 checksum as a 32-bit unsigned integer.
+ */
+
+static uint32_t Tamer_CRC2(const uint8_t *data, size_t length)
+{
+    uint32_t crc = 0xFFFFFFFF;
+    for ( size_t i = 0; i < length; i++ )
+    {
+        uint8_t byte = data[i];
+        crc          = crc ^ byte;
+        for ( int j = 7; j >= 0; j-- )
+        {
+            /* Loop for each bit */
+            uint32_t mask = (crc & 1) ? 0xFFFFFFFF : 0x00000000;
+            crc           = (crc >> 1) ^ (0xEDB88320 & mask);
+        }
+    }
+    return ~crc;
+}
+
+/** 
+ * Calculates the CRC32 of a file's contents using a predefined CRC32 function.
+ * 
+ * This function opens a specified file, reads its contents into dynamically allocated memory,
+ * calculates the CRC32 checksum, and then cleans up by freeing the allocated memory and closing the file.
+ * It uses a single cleanup section to manage all cleanup operations. This ensures that all resources
+ * are properly released in case of any error.
+ * 
+ * @param fileName Pointer to a string containing the name of the file.
+ * @return CRC32 checksum of the file contents or 0 on error.
+ */
+
+static uint32_t Tamer_GetFileCRC(const char *fileName)
+{
+    FILE    *file     = NULL;
+    uint8_t *buffer   = NULL;
+    uint32_t crc32    = 0;
+    size_t   fileSize = 0;
+
+    do
+    {
+        /* Open the file in binary mode */
+        file = fopen(fileName, "rb");
+        if ( file == NULL )
+            break;
+
+        /* Seek to the end of the file to determine the file size */
+        fseek(file, 0, SEEK_END);
+        fileSize = ftell(file);
+        rewind(file);
+
+        /* Allocate memory for the entire file */
+        buffer = (uint8_t *) malloc(fileSize);
+        if ( buffer == NULL )
+            break;
+
+        /* Read the file into the buffer */
+        if ( fread(buffer, 1, fileSize, file) != fileSize )
+            break;
+
+        /* Calculate CRC32 of the buffer */
+        crc32 = Tamer_CRC2(buffer, fileSize);
+
+    } while ( 0 );
+
+    /* Cleanup section */
+    if ( buffer != NULL )
+        free(buffer);
+
+    if ( file != NULL )
+        fclose(file);
+
+    return crc32;
+}
 
 /**
   * @}
@@ -97,11 +192,118 @@ Tamer_GlobalsTypeDef gTamer = {0};
 static int Tamer_ReadConfig(void)
 {
 
+    int         retVal            = 0;
+    char        iniFile[MAX_PATH] = {0};
+    uint32_t    crc32;
+    Tamer_Proc *el, *tmp;
 
+    do
+    {
+        if ( gTamer.config == NULL )
+        {
+            /* First run, allocate the thing */
+            gTamer.config = (Tamer_Config *) malloc(sizeof(Tamer_Config));
+            if ( gTamer.config == 0 )
+                return 0;
 
+            memset(gTamer.config, 0, sizeof(Tamer_Config));
+        }
 
-    return 0;
+        /* Figure the configuration file name and path */
+        if ( gTamer.config->filePath[0] == 0 )
+        {
+            if ( gTamer.serviceMode == true )
+            {
+                /* When running as a service we expect the .ini to be in the  \Windsows directory. */
+                if ( GetWindowsDirectory(iniFile, MAX_PATH) == 0 )
+                    break;
+            }
+            else
+            {
+                /* When not running as a service we expect the .ini to be in the local path. */
+                if ( GetCurrentDirectory(MAX_PATH, iniFile) == 0 )
+                    break;
+            }
 
+            snprintf(gTamer.config->filePath, MAX_PATH, "%s\\%s", iniFile, SRVC_TAME_INI_FILE);
+        }
+
+        /* Get the configuration file CRC to see if we have to read it again */
+        crc32 = Tamer_GetFileCRC(gTamer.config->filePath);
+        if ( crc32 == 0 )
+            break;
+
+        /* If we got a crc that is different from the previous one invalidate the processes list */
+        if ( crc32 != gTamer.config->crc32 )
+        {
+
+            /* Get the service name, display name, description and interval */
+            gTamer.config->serviceName[0] = 0;
+            GetPrivateProfileString("Service", "Name", SRVC_TAME_SERVICE_NAME, gTamer.config->serviceName, sizeof(((Tamer_Config *) 0)->serviceName) - 1,
+                                    gTamer.config->filePath);
+
+            gTamer.config->serviceDispalyName[0] = 0;
+            GetPrivateProfileString("Service", "DisplayName", SRVC_TAME_SERVICE_DISPLAY_NAME, gTamer.config->serviceDispalyName,
+                                    sizeof(((Tamer_Config *) 0)->serviceDispalyName) - 1, gTamer.config->filePath);
+
+            gTamer.config->serviceDescription[0] = 0;
+            GetPrivateProfileString("Service", "Description", SRVC_TAME_SERVICE_DESCRIPTION, gTamer.config->serviceDescription,
+                                    sizeof(((Tamer_Config *) 0)->serviceDescription) - 1, gTamer.config->filePath);
+
+            gTamer.config->interval = GetPrivateProfileInt("Service", "Interval", SRVC_TAME_INTERVAL, gTamer.config->filePath);
+
+            /* Release the process list */
+            LL_FOREACH_SAFE(gTamer.config->procList, el, tmp)
+            {
+                free(el); /* Release the node */
+            }
+
+            gTamer.config->procList = NULL;
+            gTamer.config->crc32    = crc32; /* Update our session the current crc32 */
+
+            /* Construct a new list based on the configuration file */
+            char  configEntry[256];
+            int   processIndex = 1;
+            DWORD bufferSize   = sizeof(((Tamer_Proc *) 0)->procName);
+
+            while ( 1 )
+            {
+                /* Build the list */
+                el = (Tamer_Proc *) malloc(sizeof(Tamer_Proc));
+                if ( el != NULL )
+                {
+                    /* Get the process name */
+                    memset(el, 0, sizeof(Tamer_Proc));
+                    configEntry[0] = 0;
+                    snprintf(configEntry, sizeof(configEntry), "Process%d_Name", processIndex);
+                    if ( GetPrivateProfileString("Processes", configEntry, "", el->procName, bufferSize - 1, gTamer.config->filePath) == 0 )
+                    {
+                        free(el);
+                        el = NULL;
+                        break;
+                    }
+                    /* Get the process tamed priority */
+                    configEntry[0] = 0;
+                    snprintf(configEntry, sizeof(configEntry), "Process%d_Prio", processIndex);
+                    el->priority = GetPrivateProfileInt("Processes", configEntry, 0, gTamer.config->filePath);
+                }
+
+                if ( el == NULL )
+                    break;
+
+                /* Add to the list */
+                LL_APPEND(gTamer.config->procList, el);
+
+                processIndex++;
+            }
+        }
+
+        /* Return the items we have in the process list */
+        LL_COUNT(gTamer.config->procList, el, retVal);
+
+    } while ( 0 );
+
+    return retVal;
 }
 
 /**
@@ -123,46 +325,24 @@ static int Tamer_ServiceUninstall(const char *serviceName)
             SERVICE_STATUS status;
             if ( ControlService(hService, SERVICE_CONTROL_STOP, &status) )
             {
-                printf("Stopping %s.\n", serviceName);
-                Sleep(1000);
 
+                Sleep(1000);
                 while ( QueryServiceStatus(hService, &status) )
                 {
                     if ( status.dwCurrentState == SERVICE_STOP_PENDING )
-                    {
-                        printf("Waiting for service to stop...\n");
-                        Sleep(1000);
-                    }
+                        Sleep(500);
                     else
-                    {
                         break;
-                    }
                 }
-                printf("Service stopped.\n");
             }
 
             if ( DeleteService(hService) )
-            {
-                printf("Service %s deleted successfully.\n", serviceName);
                 retVal = EXIT_SUCCESS;
-            }
-            else
-            {
-                printf("Failed to delete service %s: %lu\n", serviceName, GetLastError());
-            }
 
             CloseServiceHandle(hService);
         }
-        else
-        {
-            printf("OpenService failed: %lu\n", GetLastError());
-        }
 
         CloseServiceHandle(hSCManager);
-    }
-    else
-    {
-        printf("OpenSCManager failed: %lu\n", GetLastError());
     }
 
     return retVal;
@@ -174,7 +354,7 @@ static int Tamer_ServiceUninstall(const char *serviceName)
  * @retval int EXIT_SUCCESS on success, EXIT_FAILURE on failure.
  */
 
-static int Tamer_ServiceInstall(char *procName)
+static int Tamer_ServiceInstall(char *procName, const char *serviceName, const char *serviceDisplayName, const char *serviceDescription)
 {
     int       retVal     = EXIT_FAILURE;
     char      path[512]  = {0};
@@ -184,32 +364,20 @@ static int Tamer_ServiceInstall(char *procName)
     {
         GetFullPathName(procName, sizeof(path), path, NULL);
 
-        SC_HANDLE hService = CreateService(hSCManager, "ProcessTamer", "Intel(R) Process Tamer", SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS,
-                                           SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, path, NULL, NULL, NULL, NULL, NULL);
+        SC_HANDLE hService = CreateService(hSCManager, serviceName, serviceDisplayName, SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START,
+                                           SERVICE_ERROR_NORMAL, path, NULL, NULL, NULL, NULL, NULL);
 
         if ( hService )
         {
-            SERVICE_DESCRIPTION desc = {"Intel(R) service to manage and reduce the priority of specified "
-                                        "IT processes to mitigate their impact on system performance."};
-            if ( ! ChangeServiceConfig2(hService, SERVICE_CONFIG_DESCRIPTION, &desc) )
-            {
-                printf("Failed to set service description: %lu\n", GetLastError());
-            }
+            SERVICE_DESCRIPTION desc;
+            desc.lpDescription = (LPSTR) serviceDescription;
 
-            printf("Service installed successfully\n");
-            retVal = EXIT_SUCCESS;
+            if ( ChangeServiceConfig2(hService, SERVICE_CONFIG_DESCRIPTION, &desc) )
+                retVal = EXIT_SUCCESS;
             CloseServiceHandle(hService);
-        }
-        else
-        {
-            printf("Failed to install service: %lu\n", GetLastError());
         }
 
         CloseServiceHandle(hSCManager);
-    }
-    else
-    {
-        printf("Service Manager open failed\n");
     }
 
     return retVal;
@@ -220,9 +388,10 @@ static int Tamer_ServiceInstall(char *procName)
  * @param exeName Name of the executable whose priority to adjust.
  */
 
-static bool Tamer_SetProcessPriority(char *exeName)
+static void Tamer_SetProcessPriority(Tamer_Proc *proc)
 {
-    bool           retVal    = false;
+
+    HANDLE         hProcess;
     HANDLE         hSnapShot = CreateToolhelp32Snapshot(TH32CS_SNAPALL, 0);
     PROCESSENTRY32 pEntry;
     pEntry.dwSize = sizeof(pEntry);
@@ -230,27 +399,17 @@ static bool Tamer_SetProcessPriority(char *exeName)
 
     while ( hRes )
     {
-        if ( _stricmp(pEntry.szExeFile, exeName) == 0 )
+        if ( _stricmp(pEntry.szExeFile, proc->procName) == 0 )
         {
-            printf("Found %-48s", pEntry.szExeFile);
-            HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pEntry.th32ProcessID);
+
+            hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pEntry.th32ProcessID);
 
             if ( hProcess != NULL )
             {
                 if ( GetPriorityClass(hProcess) != IDLE_PRIORITY_CLASS )
-                {
                     SetPriorityClass(hProcess, IDLE_PRIORITY_CLASS);
-                    retVal = true;
-                    printf("OK\n");
-                }
-                else
-                    printf("Set\n");
 
                 CloseHandle(hProcess);
-            }
-            else
-            {
-                printf("Error\n");
             }
         }
 
@@ -258,7 +417,6 @@ static bool Tamer_SetProcessPriority(char *exeName)
     }
 
     CloseHandle(hSnapShot);
-    return retVal;
 }
 
 /**
@@ -306,47 +464,19 @@ static bool Tamer_ServiceInit(void)
 
 static bool Tamer_ServiceProcess(void)
 {
-    char iniFile[MAX_PATH] = {0};
-    char iniPath[MAX_PATH] = {0};
+    Tamer_Proc *el;
 
-    if ( gTamer.serviceMode == true )
+    /* Update configuration as needed */
+    if ( Tamer_ReadConfig() == 0 )
+        return false;
+
+    if ( gTamer.config == NULL || gTamer.config->procList == NULL )
+        return false;
+
+    LL_FOREACH(gTamer.config->procList, el)
     {
-        /* When running as a service we expect the .ini to be in the  \Windsows directory. */
-        if ( GetWindowsDirectory(iniPath, sizeof(iniPath)) == 0 )
-        {
-            printf("Failed to get system directory\n");
-            return false;
-        }
+        Tamer_SetProcessPriority(el);
     }
-    else
-    {
-        /* When not running as a service we expect the .ini to be in the local path. */
-        if ( GetCurrentDirectory(sizeof(iniPath), iniPath) == 0 )
-        {
-            printf("Failed to get local directory\n");
-            return false;
-        }
-    }
-
-    snprintf(iniFile, sizeof(iniFile), "%s\\%s", iniPath, SRVC_TAME_INI_FILE);
-
-    char  processName[256] = {0};
-    char  exeName[256]     = {0};
-    DWORD bufferSize       = sizeof(exeName);
-    int   processIndex     = 1;
-
-    while ( 1 )
-    {
-        processName[0] = 0;
-        snprintf(processName, sizeof(processName), "Process%d", processIndex);
-        if ( GetPrivateProfileString("Processes", processName, "", exeName, bufferSize, iniFile) == 0 )
-            break;
-
-        Tamer_SetProcessPriority(exeName);
-        processIndex++;
-    }
-
-    printf("\n");
     return true;
 }
 
@@ -389,7 +519,7 @@ bool Tamer_ServiceMain(int argc, char **argv)
     while ( gTamer.ServiceStatus.dwCurrentState == SERVICE_RUNNING )
     {
         Tamer_ServiceProcess();
-        Sleep(SRVC_TAME_INTERVAL);
+        Sleep(gTamer.config->interval);
     }
 
     return true;
@@ -406,14 +536,30 @@ int main(int argc, char *argv[])
 {
     int retVal = EXIT_FAILURE;
 
+    /* Read the configuration (.ini) file */
+    if ( Tamer_ReadConfig() == 0 )
+    {
+        if ( gTamer.config && gTamer.config->filePath )
+            printf("Error while reading configuration from %s.\r\n", gTamer.config->filePath);
+        else
+            printf("Error while looking for %s.\r\n", SRVC_TAME_INI_FILE);
+
+        return EXIT_FAILURE;
+    }
+
     gTamer.serviceMode = ! SRVC_TAME_CMD_MODE;
 
+    /* Handle service install/ uninstall from the command line */
     if ( argc == 2 )
     {
         if ( _stricmp(argv[1], "-i") == 0 )
-            return Tamer_ServiceInstall(argv[0]);
+        {
+            return Tamer_ServiceInstall(argv[0], gTamer.config->serviceName, gTamer.config->serviceDispalyName, gTamer.config->serviceDescription);
+        }
         else if ( _stricmp(argv[1], "-u") == 0 )
-            return Tamer_ServiceUninstall(SRVC_TAME_SERVICE_NAME);
+        {
+            return Tamer_ServiceUninstall(gTamer.config->serviceName);
+        }
         else
         {
             printf("Unknown command line option provided.\n");
@@ -421,6 +567,7 @@ int main(int argc, char *argv[])
         }
     }
 
+    /* Service endless loop. */
     if ( gTamer.serviceMode )
     {
         SERVICE_TABLE_ENTRY ServiceTable[2] = {{0}};
@@ -438,7 +585,7 @@ int main(int argc, char *argv[])
         while ( 1 )
         {
             Tamer_ServiceProcess();
-            Sleep(SRVC_TAME_INTERVAL);
+            Sleep(gTamer.config->interval);
         }
     }
 
