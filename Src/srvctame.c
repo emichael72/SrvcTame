@@ -15,21 +15,17 @@
  * Building / Installing:
  * ----------------------
  * 
- * 1. Build the executable and place it in your desired location.
- * 2. Create 'SrvcTame.ini' using notepad with the format provided below, and
- *    place it in your Windows directory.
- * 3. Open a command prompt with administrative rights, navigate to the directory
- *    containing the executable, and run:
- *       SrvcTame -i
- * 4. Access the Windows Service Management tool and start the service named
- *    "Intel(R) Process Tamer."
- *
- * Example of SrvcTame.ini:
- * ------------------------
- * 
- * [Processes]
- * Process1=it-agent.exe
- * Process2=it-autoupdate-service.exe
+ * 1. Compile the executable and place it in the desired location.
+ * 2. Create a configuration file named 'SrvcTame.ini' using Notepad. Follow the 
+ *    provided format and place the file in the Windows directory. Alternatively, 
+ *    for debugging purposes, set SRVC_TAME_RUN_AS_SERVICE to false and place the 
+ *    configuration file alongside the executable being debugged.
+ * 3. Open a command prompt with administrative rights, navigate to the directory 
+ *    where the executable is located, and execute the following command to install 
+ *    the service:
+ *    'SrvcTame -i' or 'SrvcTame -u' to uninstall. 
+ * 4. To start the service, either restart your system or use the 'Windows Service 
+ *    Management' tool to start the service named "Process Tamer."
  *
  ******************************************************************************
  */
