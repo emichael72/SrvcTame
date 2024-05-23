@@ -54,10 +54,10 @@
   * @{
   */
 
-#define SRVC_TAME_CMD_MODE             true                             /* Indicate command / service mode */
-#define SRVC_TAME_INI_FILE             "SrvcTame.ini"                   /* Name of the INI file we're using */
-#define SRVC_TAME_SERVICE_NAME         "ProcessTamer"                   /* Service default name */
-#define SRVC_TAME_SERVICE_DISPLAY_NAME "Process Tamer"                  /* Our service default display name */
+#define SRVC_TAME_RUN_AS_SERVICE       true                             /* Command line / service mode */
+#define SRVC_TAME_INI_FILE             "SrvcTame.ini"                   /* Name of the INI file name we're using */
+#define SRVC_TAME_SERVICE_NAME         "ProcessTamer"                   /* Service static name */
+#define SRVC_TAME_SERVICE_DISPLAY_NAME "Process Tamer"                  /* Service default display name */
 #define SRVC_TAME_SERVICE_DESCRIPTION  "Windows process taming service" /* Service default description */
 #define SRVC_TAME_INTERVAL             10000                            /* 10 seconds */
 
@@ -80,7 +80,6 @@ typedef struct __Tamer_ProcList
 
 typedef struct __Tamer_Config
 {
-    char        serviceName[256];
     char        serviceDispalyName[256];
     char        serviceDescription[256];
     char        filePath[MAX_PATH];
@@ -131,9 +130,8 @@ static uint32_t Tamer_CRC2(const uint8_t *data, size_t length)
 }
 
 /** 
- * Calculates the CRC32 of a file's contents using a predefined CRC32 function.
  * 
- * This function opens a specified file, reads its contents into dynamically allocated memory,
+ * @brief This function opens a specified file, reads its contents into dynamically allocated memory,
  * calculates the CRC32 checksum, and then cleans up by freeing the allocated memory and closing the file.
  * It uses a single cleanup section to manage all cleanup operations. This ensures that all resources
  * are properly released in case of any error.
@@ -186,10 +184,10 @@ static uint32_t Tamer_GetFileCRC(const char *fileName)
 }
 
 /** 
- * Read the .INI file into teh session configuration object.
- * After the first full read the function will do nothing if the 
- * configuration crc32 was not changed from last run.
- * @return number of items in the processes list or 0 on error.
+ * @brief reads the .INI file into the session configuration global.
+ * After the first read the function will do nothing if the 
+ * configuration crc32 is the same as the previous run crc.
+ * @return number of items in the process list or 0 on error.
  */
 
 static int Tamer_ReadConfig(void)
@@ -240,10 +238,7 @@ static int Tamer_ReadConfig(void)
         if ( crc32 != gTamer.config->crc32 )
         {
 
-            /* Get the service name, display name, description and interval */
-            gTamer.config->serviceName[0] = 0;
-            GetPrivateProfileString("Service", "Name", SRVC_TAME_SERVICE_NAME, gTamer.config->serviceName, sizeof(((Tamer_Config *) 0)->serviceName) - 1,
-                                    gTamer.config->filePath);
+            /* Get the service display name, description and interval */
 
             gTamer.config->serviceDispalyName[0] = 0;
             GetPrivateProfileString("Service", "DisplayName", SRVC_TAME_SERVICE_DISPLAY_NAME, gTamer.config->serviceDispalyName,
@@ -539,6 +534,8 @@ int main(int argc, char *argv[])
 {
     int retVal = EXIT_FAILURE;
 
+    gTamer.serviceMode = SRVC_TAME_RUN_AS_SERVICE;
+
     /* Read the configuration (.ini) file */
     if ( Tamer_ReadConfig() == 0 )
     {
@@ -550,18 +547,16 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    gTamer.serviceMode = ! SRVC_TAME_CMD_MODE;
-
     /* Handle service install/ uninstall from the command line */
     if ( argc == 2 )
     {
         if ( _stricmp(argv[1], "-i") == 0 )
         {
-            return Tamer_ServiceInstall(argv[0], gTamer.config->serviceName, gTamer.config->serviceDispalyName, gTamer.config->serviceDescription);
+            return Tamer_ServiceInstall(argv[0], SRVC_TAME_SERVICE_NAME, gTamer.config->serviceDispalyName, gTamer.config->serviceDescription);
         }
         else if ( _stricmp(argv[1], "-u") == 0 )
         {
-            return Tamer_ServiceUninstall(gTamer.config->serviceName);
+            return Tamer_ServiceUninstall(SRVC_TAME_SERVICE_NAME);
         }
         else
         {
